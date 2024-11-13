@@ -44,15 +44,15 @@ class DoclingParseV2PageBackend(PdfPageBackend):
         text_piece = ""
         page_size = self.get_size()
 
-        parser_width = self._dpage["sanitized"]["dimension"]["width"]
-        parser_height = self._dpage["sanitized"]["dimension"]["height"]
+        parser_width = self._dpage["original"]["dimension"]["width"]
+        parser_height = self._dpage["original"]["dimension"]["height"]
 
         scale = (
             1  # FIX - Replace with param in get_text_in_rect across backends (optional)
         )
 
-        cells_data = self._dpage["sanitized"]["cells"]["data"]
-        cells_header = self._dpage["sanitized"]["cells"]["header"]
+        cells_data = self._dpage["original"]["cells"]["data"]
+        cells_header = self._dpage["original"]["cells"]["header"]
 
         for i, cell_data in enumerate(cells_data):
             x0 = cell_data[cells_header.index("x0")]
@@ -70,6 +70,8 @@ class DoclingParseV2PageBackend(PdfPageBackend):
 
             overlap_frac = cell_bbox.intersection_area_with(bbox) / cell_bbox.area()
 
+            print("'{}'".format(cell_data[cells_header.index("text")]))
+
             if overlap_frac > 0.5:
                 if len(text_piece) > 0:
                     text_piece += " "
@@ -86,11 +88,11 @@ class DoclingParseV2PageBackend(PdfPageBackend):
 
         page_size = self.get_size()
 
-        parser_width = self._dpage["sanitized"]["dimension"]["width"]
-        parser_height = self._dpage["sanitized"]["dimension"]["height"]
+        parser_width = self._dpage["original"]["dimension"]["width"]
+        parser_height = self._dpage["original"]["dimension"]["height"]
 
-        cells_data = self._dpage["sanitized"]["cells"]["data"]
-        cells_header = self._dpage["sanitized"]["cells"]["header"]
+        cells_data = self._dpage["original"]["cells"]["data"]
+        cells_header = self._dpage["original"]["cells"]["header"]
 
         for i, cell_data in enumerate(cells_data):
             x0 = cell_data[cells_header.index("x0")]

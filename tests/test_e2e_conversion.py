@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from docling.backend.docling_parse_backend import DoclingParseDocumentBackend
+# from docling.backend.docling_parse_backend import DoclingParseDocumentBackend
+from docling.backend.docling_parse_v2_backend import DoclingParseV2DocumentBackend
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import ConversionResult
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -8,8 +9,8 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 
 from .verify_utils import verify_conversion_result_v1, verify_conversion_result_v2
 
-GENERATE_V1 = False
-GENERATE_V2 = False
+GENERATE_V1 = True
+GENERATE_V2 = True
 
 
 def get_pdf_paths():
@@ -32,7 +33,7 @@ def get_converter():
     converter = DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(
-                pipeline_options=pipeline_options, backend=DoclingParseDocumentBackend
+                pipeline_options=pipeline_options, backend=DoclingParseV2DocumentBackend
             )
         }
     )

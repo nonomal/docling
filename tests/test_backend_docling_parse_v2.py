@@ -58,6 +58,7 @@ def test_get_text_from_rect(test_doc_path):
     ref = "DocLayNet: A Large Human-Annotated Dataset for Document-Layout Analysis"
 
     assert textpiece.strip() == ref
+    # assert True
 
 
 def test_crop_page_image(test_doc_path):
