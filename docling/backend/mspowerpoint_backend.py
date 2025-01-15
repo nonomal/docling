@@ -10,11 +10,13 @@ from docling_core.types.doc import (
     DoclingDocument,
     DocumentOrigin,
     GroupLabel,
+    ImageRef,
     ProvenanceItem,
     Size,
     TableCell,
     TableData,
 )
+from PIL import Image, UnidentifiedImageError
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 
@@ -118,6 +120,7 @@ class MsPowerpointDocumentBackend(DeclarativeDocumentBackend, PaginatedDocumentB
         bullet_type = "None"
         list_text = ""
         list_label = GroupLabel.LIST
+        doc_label = DocItemLabel.LIST_ITEM
         prov = self.generate_prov(shape, slide_ind, shape.text.strip())
 
         # Identify if shape contains lists
@@ -268,9 +271,25 @@ class MsPowerpointDocumentBackend(DeclarativeDocumentBackend, PaginatedDocumentB
         return
 
     def handle_pictures(self, shape, parent_slide, slide_ind, doc):
-        # shape has picture
-        prov = self.generate_prov(shape, slide_ind, "")
-        doc.add_picture(parent=parent_slide, caption=None, prov=prov)
+        # Get the image bytes
+        image = shape.image
+        image_bytes = image.blob
+        im_dpi, _ = image.dpi
+
+        # Open it with PIL
+        try:
+            pil_image = Image.open(BytesIO(image_bytes))
+
+            # shape has picture
+            prov = self.generate_prov(shape, slide_ind, "")
+            doc.add_picture(
+                parent=parent_slide,
+                image=ImageRef.from_pil(image=pil_image, dpi=im_dpi),
+                caption=None,
+                prov=prov,
+            )
+        except (UnidentifiedImageError, OSError) as e:
+            _log.warning(f"Warning: image cannot be loaded by Pillow: {e}")
         return
 
     def handle_tables(self, shape, parent_slide, slide_ind, doc):
