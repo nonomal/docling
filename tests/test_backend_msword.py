@@ -6,10 +6,13 @@ from docling.backend.msword_backend import MsWordDocumentBackend
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import (
     ConversionResult,
+    DoclingDocument,
     InputDocument,
     SectionHeaderItem,
 )
 from docling.document_converter import DocumentConverter
+
+from .verify_utils import verify_docitems
 
 GENERATE = False
 
@@ -68,8 +71,21 @@ def verify_export(pred_text: str, gtfile: str):
         with open(gtfile, "r") as fr:
             true_text = fr.read()
 
-        assert pred_text == true_text, "pred_itxt==true_itxt"
         return pred_text == true_text
+
+
+def verify_document(pred_doc: DoclingDocument, gtfile: str):
+
+    if not os.path.exists(gtfile) or GENERATE:
+        with open(gtfile, "w") as fw:
+            json.dump(pred_doc.export_to_dict(), fw, indent=2)
+
+        return True
+    else:
+        with open(gtfile, "r") as fr:
+            true_doc = DoclingDocument.model_validate_json(fr.read())
+
+        return verify_docitems(pred_doc, true_doc, fuzzy=False)
 
 
 def test_e2e_docx_conversions():
@@ -98,5 +114,8 @@ def test_e2e_docx_conversions():
             pred_itxt, str(gt_path) + ".itxt"
         ), "export to indented-text"
 
-        pred_json: str = json.dumps(doc.export_to_dict(), indent=2)
-        assert verify_export(pred_json, str(gt_path) + ".json"), "export to json"
+        assert verify_document(doc, str(gt_path) + ".json"), "document document"
+
+        if docx_path.name == "word_tables.docx":
+            pred_html: str = doc.export_to_html()
+            assert verify_export(pred_html, str(gt_path) + ".html"), "export to html"

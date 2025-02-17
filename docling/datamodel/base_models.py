@@ -1,13 +1,16 @@
-from enum import Enum, auto
-from io import BytesIO
+from enum import Enum
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 from docling_core.types.doc import (
     BoundingBox,
     DocItemLabel,
+    NodeItem,
     PictureDataType,
     Size,
     TableCell,
+)
+from docling_core.types.io import (  # DO ΝΟΤ REMOVE; explicitly exposed from this location
+    DocumentStream,
 )
 from PIL.Image import Image
 from pydantic import BaseModel, ConfigDict
@@ -17,14 +20,17 @@ if TYPE_CHECKING:
 
 
 class ConversionStatus(str, Enum):
-    PENDING = auto()
-    STARTED = auto()
-    FAILURE = auto()
-    SUCCESS = auto()
-    PARTIAL_SUCCESS = auto()
+    PENDING = "pending"
+    STARTED = "started"
+    FAILURE = "failure"
+    SUCCESS = "success"
+    PARTIAL_SUCCESS = "partial_success"
+    SKIPPED = "skipped"
 
 
 class InputFormat(str, Enum):
+    """A document format supported by document backend parsers."""
+
     DOCX = "docx"
     PPTX = "pptx"
     HTML = "html"
@@ -32,11 +38,17 @@ class InputFormat(str, Enum):
     PDF = "pdf"
     ASCIIDOC = "asciidoc"
     MD = "md"
+    CSV = "csv"
+    XLSX = "xlsx"
+    XML_USPTO = "xml_uspto"
+    XML_JATS = "xml_jats"
+    JSON_DOCLING = "json_docling"
 
 
 class OutputFormat(str, Enum):
     MARKDOWN = "md"
     JSON = "json"
+    HTML = "html"
     TEXT = "text"
     DOCTAGS = "doctags"
 
@@ -47,8 +59,13 @@ FormatToExtensions: Dict[InputFormat, List[str]] = {
     InputFormat.PDF: ["pdf"],
     InputFormat.MD: ["md"],
     InputFormat.HTML: ["html", "htm", "xhtml"],
+    InputFormat.XML_JATS: ["xml", "nxml"],
     InputFormat.IMAGE: ["jpg", "jpeg", "png", "tif", "tiff", "bmp"],
     InputFormat.ASCIIDOC: ["adoc", "asciidoc", "asc"],
+    InputFormat.CSV: ["csv"],
+    InputFormat.XLSX: ["xlsx"],
+    InputFormat.XML_USPTO: ["xml", "txt"],
+    InputFormat.JSON_DOCLING: ["json"],
 }
 
 FormatToMimeType: Dict[InputFormat, List[str]] = {
@@ -62,6 +79,7 @@ FormatToMimeType: Dict[InputFormat, List[str]] = {
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ],
     InputFormat.HTML: ["text/html", "application/xhtml+xml"],
+    InputFormat.XML_JATS: ["application/xml"],
     InputFormat.IMAGE: [
         "image/png",
         "image/jpeg",
@@ -72,21 +90,31 @@ FormatToMimeType: Dict[InputFormat, List[str]] = {
     InputFormat.PDF: ["application/pdf"],
     InputFormat.ASCIIDOC: ["text/asciidoc"],
     InputFormat.MD: ["text/markdown", "text/x-markdown"],
+    InputFormat.CSV: ["text/csv"],
+    InputFormat.XLSX: [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ],
+    InputFormat.XML_USPTO: ["application/xml", "text/plain"],
+    InputFormat.JSON_DOCLING: ["application/json"],
 }
-MimeTypeToFormat = {
-    mime: fmt for fmt, mimes in FormatToMimeType.items() for mime in mimes
+
+MimeTypeToFormat: dict[str, list[InputFormat]] = {
+    mime: [fmt for fmt in FormatToMimeType if mime in FormatToMimeType[fmt]]
+    for value in FormatToMimeType.values()
+    for mime in value
 }
 
 
 class DocInputType(str, Enum):
-    PATH = auto()
-    STREAM = auto()
+    PATH = "path"
+    STREAM = "stream"
 
 
 class DoclingComponentType(str, Enum):
-    DOCUMENT_BACKEND = auto()
-    MODEL = auto()
-    DOC_ASSEMBLER = auto()
+    DOCUMENT_BACKEND = "document_backend"
+    MODEL = "model"
+    DOC_ASSEMBLER = "doc_assembler"
+    USER_INPUT = "user_input"
 
 
 class ErrorItem(BaseModel):
@@ -111,6 +139,7 @@ class Cluster(BaseModel):
     bbox: BoundingBox
     confidence: float = 1.0
     cells: List[Cell] = []
+    children: List["Cluster"] = []  # Add child cluster support
 
 
 class BasePageElement(BaseModel):
@@ -123,6 +152,12 @@ class BasePageElement(BaseModel):
 
 class LayoutPrediction(BaseModel):
     clusters: List[Cluster] = []
+
+
+class ContainerElement(
+    BasePageElement
+):  # Used for Form and Key-Value-Regions, only for typing.
+    pass
 
 
 class Table(BasePageElement):
@@ -164,13 +199,20 @@ class PagePredictions(BaseModel):
     equations_prediction: Optional[EquationPrediction] = None
 
 
-PageElement = Union[TextElement, Table, FigureElement]
+PageElement = Union[TextElement, Table, FigureElement, ContainerElement]
 
 
 class AssembledUnit(BaseModel):
     elements: List[PageElement] = []
     body: List[PageElement] = []
     headers: List[PageElement] = []
+
+
+class ItemAndImageEnrichmentElement(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    item: NodeItem
+    image: Image
 
 
 class Page(BaseModel):
@@ -191,20 +233,29 @@ class Page(BaseModel):
         {}
     )  # Cache of images in different scales. By default it is cleared during assembling.
 
-    def get_image(self, scale: float = 1.0) -> Optional[Image]:
+    def get_image(
+        self, scale: float = 1.0, cropbox: Optional[BoundingBox] = None
+    ) -> Optional[Image]:
         if self._backend is None:
             return self._image_cache.get(scale, None)
+
         if not scale in self._image_cache:
-            self._image_cache[scale] = self._backend.get_page_image(scale=scale)
-        return self._image_cache[scale]
+            if cropbox is None:
+                self._image_cache[scale] = self._backend.get_page_image(scale=scale)
+            else:
+                return self._backend.get_page_image(scale=scale, cropbox=cropbox)
+
+        if cropbox is None:
+            return self._image_cache[scale]
+        else:
+            page_im = self._image_cache[scale]
+            assert self.size is not None
+            return page_im.crop(
+                cropbox.to_top_left_origin(page_height=self.size.height)
+                .scaled(scale=scale)
+                .as_tuple()
+            )
 
     @property
     def image(self) -> Optional[Image]:
         return self.get_image(scale=self._default_image_scale)
-
-
-class DocumentStream(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    name: str
-    stream: BytesIO
